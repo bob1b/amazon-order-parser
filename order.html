@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="">
+<head>
+   <meta charset="utf-8">
+   <meta http-equiv="x-ua-compatible" content="ie=edge">
+
+  <script src="./jquery-2.2.0.min.js"></script>
+  <script>
+    $( document ).ready(function() {
+        $("#order-source").change( function(){
+            message("working...");
+            var html = $.parseHTML( $("#order-source").val() );
+            var values = parseIt( html );
+            outputIt( values );
+            message("");
+        });
+    });
+
+    function message(msg){ $("#message").html(msg); }
+
+    function debug(a){ console.log(a); }
+
+    /* for amazon */
+    function parseIt( html ){
+        function month_name_to_number(val_in){
+            var conversions = { 'january':'01', 'february':'02', 'march':'03', 'april':'04', 'may':'05', 'june':'06',
+                                'july':'07', 'august':'08', 'september':'09', 'october':'10', 'november':'11', 'december':'12' };
+            var val = val_in.toLowerCase();
+
+            if (conversions[val]){
+                return conversions[val];
+            }
+
+            console.log('month_name_to_number("' + val_in + '" couldn\'t find a match');
+            return "??";
+        }
+
+        function get_date(){
+            var val = el.find(".order-date-invoice-item:eq(0)").html().trim();
+            var start = 11;
+            var end = val.indexOf("<i");
+            var date_out = val.substring(start, end).trim();
+            var parts = date_out.split(' ');
+
+            console.log(parts);
+
+            return month_name_to_number(parts[0]) +  // convert month name to two-digit number
+                   "/" + 
+                   parts[1].substring(0, parts[1].length - 1) + // trim comma from end of day of the month
+                   "/" +
+                   parts[2];
+        }
+
+        function get_order_num(){
+            return el.find(".order-date-invoice-item:eq(1)").html().trim().substr(7).trim();
+        }
+
+        var el = $(html);
+        var url_base = "http://amazon.com";
+
+        var values = {
+          "date_ordered":     get_date(),
+          "order_number":     get_order_num(),
+	      "subtotal":         el.find("#od-subtotals .a-row:eq(0) .a-column:eq(1) span").html(),
+	      "shipping_handling":el.find("#od-subtotals .a-row:eq(1) .a-column:eq(1) span").html(),
+	      "total_before_tax": el.find("#od-subtotals .a-row:eq(3) .a-column:eq(1) span").html(),
+	      "estimated_tax":    el.find("#od-subtotals .a-row:eq(4) .a-column:eq(1) span").html(),
+	      "grand_total":      el.find("#od-subtotals .a-row:eq(6) .a-column:eq(1) span").html()
+        };
+
+        // trim values if defined
+        $(values).each( function( key, value ){
+          if ( typeof( value[key] ) !== "undefined" ){
+            value[key] = value[key].trim();
+          }
+        });
+
+
+        var num_items = $(el).find(".item-view-left-col-inner").length;
+        debug(num_items + " items");
+        var items = [num_items];
+        var item = {}
+
+        for (var i = 0; i < num_items; i++){
+            item = $(el).find(".a-fixed-right-grid-col.a-col-left .a-fixed-left-grid").eq(i);
+            items[i] = {"link":url_base + item.find(".a-link-normal").attr("href"),
+                        "name":item.find(".a-link-normal img").attr('title'),
+                        "quantity":item.find(".item-view-qty").html(),
+                        "sold_by":(item.find(".a-size-small.a-color-secondary a").html() ||
+                                   item.find(".a-size-small.a-color-secondary").html().substr(9).trim().replace(/\s+/g, ' ')),
+                        "image":item.find(".a-link-normal img").attr("src"),
+                        "image_hires":item.find(".a-link-normal img").attr("data-a-hires"),
+                            "price":item.find(".a-color-price").html() };
+        }
+        values.items = items;
+
+        debug(values);
+        return values;
+    }
+
+
+    // output for spreadsheet
+    function outputIt( values ){
+        function col( val ){
+            return "<td>" + val + "</td>";
+        }
+        var line = "<table style='padding:20px; border:1px solid gray'><tr>" + col(values.date_ordered);
+        var tab_del = values.date_ordered + "\t" + "C\t" + "Amazon\t" + "order #" + values.order_number + "<br>";
+
+        line += col("C");
+        line += col("Amazon")
+
+        var item_lines = "order #" + values.order_number + "<br>";
+        for (i = 0; i < values.items.length; i++){
+            // date, 'C', Amazon (sold_by), item name + link + price, total
+
+            // hyperlink
+            item_lines += '<a href="'+values.items[i].link+'">';
+            if (values.items[i].quantity){
+                item_lines += values.items[i].quantity + " x ";
+            }
+            item_lines += values.items[i].name + '</a>\t ';
+            item_lines += values.items[i].price;
+            if (values.items[i].quantity){
+                item_lines += " each";
+            }
+            item_lines += "<br>";
+        }
+
+        if (values.shipping_handling !== "$0.00"){
+            item_lines += "s/h: " + values.shipping_handling + "<br>";
+        }
+
+        if (values.estimated_tax !== "$0.00"){
+            item_lines += "tax: " + values.estimated_tax;
+        }
+        line += col(item_lines);
+        tab_del += item_lines + "\t";
+
+        line += col(values.grand_total);
+        tab_del += values.grand_total;
+
+        $("#output").html(line);
+        $("#output_tab_del").html(tab_del);
+    }
+
+    // copy-to-clipboard
+function SelectTable(tableId) {
+    var columnText = 'You selected:\n\n';
+    var columnSelector = '#' + tableId + ' tbody';
+    var cells = $(columnSelector);
+
+    // clear existing selections
+    if (window.getSelection) { // all browsers, except IE before version 9
+        window.getSelection().removeAllRanges();
+    }
+
+
+    if (document.createRange) {
+        cells.each(function(i, cell) {
+            var rangeObj = document.createRange();
+            rangeObj.selectNodeContents(cell);
+            window.getSelection().addRange(rangeObj);
+            columnText = columnText + '\n' + rangeObj.toString();
+        });
+
+
+    }
+
+//  alert(columnText);
+}
+
+  </script>
+</head>
+<body>
+    <h1>amazon order parser</h1>
+    <p>paste source here</p>
+    <textarea id="order-source" style="width:90%; height:400px;"></textarea>
+    <div id="message" style="font-weight:bold"> -- </div>
+    <code id="output" style="width:90;"></code>
+
+    <div>
+        <button onclick="SelectTable('output');">select</button>
+    </div>
+    <code id="output_tab_del" style="width:90;"></code>
+
+</body>
+</html>
